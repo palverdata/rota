@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"strings"
@@ -99,7 +100,11 @@ func (h *UpstreamProxyHandler) HandleRequest(req *http.Request, ctx *goproxy.Pro
 			"error", err,
 			"duration_ms", duration,
 		)
-		return req, h.badGateway(err.Error())
+
+		// Expose the real cause only when debug is explicitly enabled by the client.
+		// This prevents leaking proxy credentials / internal network info by default.
+		debug := req.Header.Get("X-Rota-Debug") == "1"
+		return req, h.badGatewayWithDetails(requestID, err, debug)
 	}
 
 	h.logger.Info("proxy request completed",
@@ -593,12 +598,84 @@ func (h *UpstreamProxyHandler) connectViaProxy(proxy *models.Proxy, host string)
 
 	case "http", "https":
 		// For HTTP proxies, we need to send a CONNECT request
-		// This is more complex and requires HTTP client setup
 		return h.connectViaHTTPProxy(proxy, host)
 
 	default:
 		return nil, fmt.Errorf("unsupported proxy protocol for CONNECT: %s", proxy.Protocol)
 	}
+}
+
+// normalizeHTTPProxyAddress makes proxy.Address usable for net.Dial ("host:port")
+// while also extracting embedded basic-auth creds if address is like:
+//
+//	http://user:pass@host:port
+//	https://user:pass@host:port/path
+//
+// It avoids new imports by doing simple string parsing.
+func normalizeHTTPProxyAddress(p *models.Proxy) (hostport string, basicAuthHeader string, err error) {
+	raw := strings.TrimSpace(p.Address)
+	if raw == "" {
+		return "", "", fmt.Errorf("empty proxy address")
+	}
+
+	working := raw
+
+	// Strip scheme if present (anything://)
+	if i := strings.Index(working, "://"); i >= 0 {
+		working = working[i+3:]
+	}
+
+	// Strip path/query/fragment
+	// e.g. host:port/something -> host:port
+	if i := strings.IndexByte(working, '/'); i >= 0 {
+		working = working[:i]
+	}
+	if i := strings.IndexByte(working, '?'); i >= 0 {
+		working = working[:i]
+	}
+	if i := strings.IndexByte(working, '#'); i >= 0 {
+		working = working[:i]
+	}
+
+	// Extract userinfo if present: user:pass@host:port
+	var userinfo string
+	if at := strings.LastIndexByte(working, '@'); at >= 0 {
+		userinfo = working[:at]
+		hostport = working[at+1:]
+	} else {
+		hostport = working
+	}
+
+	if hostport == "" {
+		return "", "", fmt.Errorf("invalid proxy address %q: missing host:port", raw)
+	}
+
+	// If userinfo exists and model doesn't already have username, fill it.
+	if userinfo != "" && (p.Username == nil || *p.Username == "") {
+		user := userinfo
+		pass := ""
+		if c := strings.IndexByte(userinfo, ':'); c >= 0 {
+			user = userinfo[:c]
+			pass = userinfo[c+1:]
+		}
+		if user != "" {
+			p.Username = &user
+			p.Password = &pass
+		}
+	}
+
+	// Build Proxy-Authorization if creds exist in model fields
+	if p.Username != nil && *p.Username != "" {
+		password := ""
+		if p.Password != nil {
+			password = *p.Password
+		}
+		auth := *p.Username + ":" + password
+		encoded := base64.StdEncoding.EncodeToString([]byte(auth))
+		basicAuthHeader = "Basic " + encoded
+	}
+
+	return hostport, basicAuthHeader, nil
 }
 
 // connectViaHTTPProxy establishes a connection through HTTP proxy using CONNECT method
@@ -609,17 +686,23 @@ func (h *UpstreamProxyHandler) connectViaHTTPProxy(proxy *models.Proxy, host str
 		timeout = 60 * time.Second // Minimum 60 seconds for CONNECT requests
 	}
 
+	// IMPORTANT: Dial needs host:port (no scheme, no creds). Also extract creds if embedded.
+	proxyHostPort, basicAuth, err := normalizeHTTPProxyAddress(proxy)
+	if err != nil {
+		return nil, err
+	}
+
 	h.logger.Info("establishing HTTP CONNECT",
 		"source", "proxy",
-		"proxy_address", proxy.Address,
+		"proxy_address", proxyHostPort,
 		"target_host", host,
 		"timeout", timeout,
 	)
 
 	// Create a TCP connection to the proxy server
-	conn, err := net.DialTimeout("tcp", proxy.Address, timeout)
+	conn, err := net.DialTimeout("tcp", proxyHostPort, timeout)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to proxy %s: %w", proxy.Address, err)
+		return nil, fmt.Errorf("failed to connect to proxy %s: %w", proxyHostPort, err)
 	}
 
 	// Set read/write deadlines
@@ -634,20 +717,18 @@ func (h *UpstreamProxyHandler) connectViaHTTPProxy(proxy *models.Proxy, host str
 	connectReq := fmt.Sprintf("CONNECT %s HTTP/1.1\r\n", host)
 	connectReq += fmt.Sprintf("Host: %s\r\n", host)
 
-	// Add proxy authentication if credentials are provided
-	if proxy.Username != nil && *proxy.Username != "" {
-		password := ""
-		if proxy.Password != nil {
-			password = *proxy.Password
-		}
-		auth := *proxy.Username + ":" + password
-		encoded := base64.StdEncoding.EncodeToString([]byte(auth))
-		connectReq += fmt.Sprintf("Proxy-Authorization: Basic %s\r\n", encoded)
+	// Add proxy authentication if credentials are provided (supports embedded URL creds too)
+	if basicAuth != "" {
+		connectReq += fmt.Sprintf("Proxy-Authorization: %s\r\n", basicAuth)
 
+		usr := ""
+		if proxy.Username != nil {
+			usr = *proxy.Username
+		}
 		h.logger.Info("adding proxy authentication",
 			"source", "proxy",
-			"proxy_address", proxy.Address,
-			"username", *proxy.Username,
+			"proxy_address", proxyHostPort,
+			"username", usr,
 		)
 	}
 
@@ -658,7 +739,7 @@ func (h *UpstreamProxyHandler) connectViaHTTPProxy(proxy *models.Proxy, host str
 
 	h.logger.Info("sending CONNECT request",
 		"source", "proxy",
-		"proxy_address", proxy.Address,
+		"proxy_address", proxyHostPort,
 		"target_host", host,
 	)
 
@@ -680,7 +761,7 @@ func (h *UpstreamProxyHandler) connectViaHTTPProxy(proxy *models.Proxy, host str
 	response := string(buf[:n])
 	h.logger.Info("received CONNECT response",
 		"source", "proxy",
-		"proxy_address", proxy.Address,
+		"proxy_address", proxyHostPort,
 		"response_preview", response[:min(200, len(response))],
 	)
 
@@ -707,7 +788,7 @@ func (h *UpstreamProxyHandler) connectViaHTTPProxy(proxy *models.Proxy, host str
 
 	h.logger.Info("CONNECT tunnel established",
 		"source", "proxy",
-		"proxy_address", proxy.Address,
+		"proxy_address", proxyHostPort,
 		"target_host", host,
 	)
 
@@ -734,4 +815,42 @@ func (h *UpstreamProxyHandler) badGateway(message string) *http.Response {
 	}
 	resp.Header.Set("Content-Type", "text/plain")
 	return resp
+}
+
+func (h *UpstreamProxyHandler) badGatewayWithDetails(requestID string, err error, debug bool) *http.Response {
+	resp := &http.Response{
+		StatusCode: http.StatusBadGateway,
+		ProtoMajor: 1,
+		ProtoMinor: 1,
+		Header:     make(http.Header),
+		Body:       http.NoBody,
+	}
+
+	resp.Header.Set("Content-Type", "text/plain; charset=utf-8")
+	resp.Header.Set("X-Rota-Request-Id", requestID)
+
+	// Always include a high-level hint (safe)
+	safeMsg := "Bad Gateway: upstream proxy request failed"
+	resp.Header.Set("X-Rota-Error", safeMsg)
+
+	if !debug {
+		// Don’t leak internals unless requested
+		resp.Body = io.NopCloser(strings.NewReader(safeMsg + "\n"))
+		resp.ContentLength = int64(len(safeMsg) + 1)
+		return resp
+	}
+
+	// Debug mode: include full error (may include hostnames, creds, etc)
+	full := fmt.Sprintf("%s\nrequest_id=%s\ncause=%v\n", safeMsg, requestID, err)
+	resp.Header.Set("X-Rota-Error-Detail", truncateHeader(full, 900)) // header size safety
+	resp.Body = io.NopCloser(strings.NewReader(full))
+	resp.ContentLength = int64(len(full))
+	return resp
+}
+
+func truncateHeader(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max]
 }

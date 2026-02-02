@@ -72,10 +72,9 @@ func (h *HealthChecker) CheckProxy(ctx context.Context, proxy *models.Proxy) (*m
 		transport.TLSClientConfig = &tls.Config{}
 	}
 	transport.TLSClientConfig.InsecureSkipVerify = true
-	transport.TLSClientConfig.MinVersion = 0 // Allow all TLS versions including SSLv3
-	transport.TLSClientConfig.MaxVersion = 0 // No maximum version restriction
+	transport.TLSClientConfig.MinVersion = 0     // Allow all TLS versions including SSLv3
+	transport.TLSClientConfig.MaxVersion = 0     // No maximum version restriction
 	transport.TLSClientConfig.CipherSuites = nil // Accept all cipher suites
-	// This callback allows us to accept even unparseable certificates
 	transport.TLSClientConfig.VerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
 		// Always return nil to accept any certificate, even malformed ones
 		return nil
@@ -250,8 +249,76 @@ func (h *HealthChecker) CheckAllProxies(ctx context.Context) ([]models.ProxyTest
 
 // createTransport creates an HTTP transport for the proxy
 func (h *HealthChecker) createTransport(p *models.Proxy) (*http.Transport, error) {
+	// IMPORTANT:
+	// Some parts of the system store address as a full URL (e.g. "http://user:pass@host:port").
+	// CreateProxyTransport typically composes its own proxy URL using Protocol + Address.
+	// If Address already contains "http://", it can accidentally become "http://http://..."
+	// which later shows up as: "lookup http ... no such host".
+	//
+	// So for health checks, normalize the proxy before building the transport.
+	normalized := normalizeProxyForTransport(p)
+
 	// Use shared transport creation utility
-	return CreateProxyTransport(p)
+	return CreateProxyTransport(normalized)
+}
+
+// normalizeProxyForTransport ensures p.Address is "host:port" (no scheme, no creds, no path)
+// and if credentials are embedded (user:pass@...), it fills Username/Password when missing.
+// It avoids new imports by doing basic string parsing.
+func normalizeProxyForTransport(p *models.Proxy) *models.Proxy {
+	// Copy to avoid mutating the caller's instance (especially during concurrent checks)
+	cp := *p
+
+	raw := strings.TrimSpace(cp.Address)
+	if raw == "" {
+		return &cp
+	}
+
+	working := raw
+
+	// Strip scheme if present: anything://...
+	if i := strings.Index(working, "://"); i >= 0 {
+		working = working[i+3:]
+	}
+
+	// Strip path/query/fragment
+	if i := strings.IndexByte(working, '/'); i >= 0 {
+		working = working[:i]
+	}
+	if i := strings.IndexByte(working, '?'); i >= 0 {
+		working = working[:i]
+	}
+	if i := strings.IndexByte(working, '#'); i >= 0 {
+		working = working[:i]
+	}
+
+	// Extract userinfo if present: user:pass@host:port
+	var userinfo string
+	if at := strings.LastIndexByte(working, '@'); at >= 0 {
+		userinfo = working[:at]
+		working = working[at+1:]
+	}
+
+	// Fill creds from embedded userinfo if model fields are empty
+	if userinfo != "" && (cp.Username == nil || *cp.Username == "") {
+		user := userinfo
+		pass := ""
+		if c := strings.IndexByte(userinfo, ':'); c >= 0 {
+			user = userinfo[:c]
+			pass = userinfo[c+1:]
+		}
+		if user != "" {
+			cp.Username = &user
+			cp.Password = &pass
+		}
+	}
+
+	// Finally, Address must be host:port
+	if working != "" {
+		cp.Address = working
+	}
+
+	return &cp
 }
 
 // StartPeriodicHealthCheck starts a background health check routine
