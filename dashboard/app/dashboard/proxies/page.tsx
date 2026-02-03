@@ -457,6 +457,18 @@ export default function ProxiesPage() {
       ),
     },
     {
+      accessorKey: "label",
+      header: "Label",
+      cell: ({ row }) => {
+        const label = row.getValue("label") as string | undefined
+        return label ? (
+          <span className="text-muted-foreground">{label}</span>
+        ) : (
+          <span className="text-muted-foreground/50">-</span>
+        )
+      },
+    },
+    {
       accessorKey: "status",
       header: ({ column }) => {
         return (
