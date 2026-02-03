@@ -20,6 +20,7 @@ spec:
       containers:
         - name: core
           image: palverdata/rota_core:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 8000
               name: proxy
