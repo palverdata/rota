@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rota-config
+  namespace: rota
+data:
+  PROXY_PORT: "8000"
+  API_PORT: "8001"
+  LOG_LEVEL: "info"
+  DB_HOST: "db.rota.svc.cluster.local"
+  DB_PORT: "5432"
+  DB_NAME: "rota"
+  DB_SSLMODE: "disable"
+  TIMESCALEDB_TELEMETRY: "off"
+  NEXT_PUBLIC_API_URL: "http://core.rota.svc.cluster.local:8001"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: rota-secrets
+  namespace: rota
+type: Opaque
+stringData:
+  DB_USER: "CHANGE_ME"
+  DB_PASSWORD: "CHANGE_ME"
+  ROTA_ADMIN_USER: "CHANGE_ME"
+  ROTA_ADMIN_PASSWORD: "CHANGE_ME"
+  POSTGRES_USER: "CHANGE_ME"
+  POSTGRES_PASSWORD: "CHANGE_ME"
+  POSTGRES_DB: "rota"
