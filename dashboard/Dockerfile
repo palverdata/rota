@@ -19,9 +19,13 @@ RUN corepack enable && corepack prepare pnpm@10.19.0 --activate
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
+# Build argument for API URL (required for Next.js public env vars)
+ARG NEXT_PUBLIC_API_URL=http://localhost:8001
+
 # Set environment variables for build
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 
 # Build the application
 RUN pnpm run build
