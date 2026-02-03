@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: core
-          image: ghcr.io/palverdata/rota:latest
+          image: palverdata/rota_core:latest
           ports:
             - containerPort: 8000
               name: proxy
