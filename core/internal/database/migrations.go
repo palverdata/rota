@@ -245,6 +245,16 @@ var migrations = []Migration{
 			WHERE key = 'healthcheck';
 		`,
 	},
+	{
+		Version:     11,
+		Description: "Add label column to proxies table",
+		Up: `
+			ALTER TABLE proxies ADD COLUMN IF NOT EXISTS label VARCHAR(255);
+		`,
+		Down: `
+			ALTER TABLE proxies DROP COLUMN IF EXISTS label;
+		`,
+	},
 }
 
 // Migrate runs all pending migrations

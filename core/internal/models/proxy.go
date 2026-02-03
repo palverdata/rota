@@ -4,20 +4,21 @@ import "time"
 
 // Proxy represents a proxy server
 type Proxy struct {
-	ID                 int       `json:"id"`
-	Address            string    `json:"address"`
-	Protocol           string    `json:"protocol"`
-	Username           *string   `json:"username,omitempty"`
-	Password           *string   `json:"-"` // Never expose password in JSON
-	Status             string    `json:"status"`
-	Requests           int64     `json:"requests"`
-	SuccessfulRequests int64     `json:"-"`
-	FailedRequests     int64     `json:"-"`
-	AvgResponseTime    int       `json:"avg_response_time"`
+	ID                 int        `json:"id"`
+	Address            string     `json:"address"`
+	Protocol           string     `json:"protocol"`
+	Username           *string    `json:"username,omitempty"`
+	Password           *string    `json:"-"` // Never expose password in JSON
+	Label              *string    `json:"label,omitempty"`
+	Status             string     `json:"status"`
+	Requests           int64      `json:"requests"`
+	SuccessfulRequests int64      `json:"-"`
+	FailedRequests     int64      `json:"-"`
+	AvgResponseTime    int        `json:"avg_response_time"`
 	LastCheck          *time.Time `json:"last_check,omitempty"`
-	LastError          *string   `json:"-"`
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
+	LastError          *string    `json:"-"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
 }
 
 // ProxyWithStats represents a proxy with calculated statistics
@@ -26,6 +27,7 @@ type ProxyWithStats struct {
 	Address         string     `json:"address"`
 	Protocol        string     `json:"protocol"`
 	Username        *string    `json:"username,omitempty"`
+	Label           *string    `json:"label,omitempty"`
 	Status          string     `json:"status"`
 	Requests        int64      `json:"requests"`
 	SuccessRate     float64    `json:"success_rate"`
@@ -41,6 +43,7 @@ type CreateProxyRequest struct {
 	Protocol string  `json:"protocol" validate:"required,oneof=http https socks4 socks4a socks5"`
 	Username *string `json:"username,omitempty"`
 	Password *string `json:"password,omitempty"`
+	Label    *string `json:"label,omitempty"`
 }
 
 // UpdateProxyRequest represents a request to update a proxy
@@ -49,6 +52,7 @@ type UpdateProxyRequest struct {
 	Protocol string  `json:"protocol" validate:"omitempty,oneof=http https socks4 socks4a socks5"`
 	Username *string `json:"username,omitempty"`
 	Password *string `json:"password,omitempty"`
+	Label    *string `json:"label,omitempty"`
 }
 
 // BulkCreateProxyRequest represents a request to create multiple proxies

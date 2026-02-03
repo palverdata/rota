@@ -86,7 +86,7 @@ func (r *ProxyRepository) List(ctx context.Context, page, limit int, search, sta
 	offset := (page - 1) * limit
 	query := fmt.Sprintf(`
 		SELECT
-			id, address, protocol, username, status,
+			id, address, protocol, username, label, status,
 			requests, successful_requests, failed_requests,
 			avg_response_time, last_check, created_at, updated_at
 		FROM proxies
@@ -107,7 +107,7 @@ func (r *ProxyRepository) List(ctx context.Context, page, limit int, search, sta
 	for rows.Next() {
 		var p models.Proxy
 		err := rows.Scan(
-			&p.ID, &p.Address, &p.Protocol, &p.Username, &p.Status,
+			&p.ID, &p.Address, &p.Protocol, &p.Username, &p.Label, &p.Status,
 			&p.Requests, &p.SuccessfulRequests, &p.FailedRequests,
 			&p.AvgResponseTime, &p.LastCheck, &p.CreatedAt, &p.UpdatedAt,
 		)
@@ -126,6 +126,7 @@ func (r *ProxyRepository) List(ctx context.Context, page, limit int, search, sta
 			Address:         p.Address,
 			Protocol:        p.Protocol,
 			Username:        p.Username,
+			Label:           p.Label,
 			Status:          p.Status,
 			Requests:        p.Requests,
 			SuccessRate:     successRate,
@@ -143,7 +144,7 @@ func (r *ProxyRepository) List(ctx context.Context, page, limit int, search, sta
 func (r *ProxyRepository) GetByID(ctx context.Context, id int) (*models.Proxy, error) {
 	query := `
 		SELECT
-			id, address, protocol, username, password, status,
+			id, address, protocol, username, password, label, status,
 			requests, successful_requests, failed_requests,
 			avg_response_time, last_check, last_error, created_at, updated_at
 		FROM proxies
@@ -152,7 +153,7 @@ func (r *ProxyRepository) GetByID(ctx context.Context, id int) (*models.Proxy, e
 
 	var p models.Proxy
 	err := r.db.Pool.QueryRow(ctx, query, id).Scan(
-		&p.ID, &p.Address, &p.Protocol, &p.Username, &p.Password, &p.Status,
+		&p.ID, &p.Address, &p.Protocol, &p.Username, &p.Password, &p.Label, &p.Status,
 		&p.Requests, &p.SuccessfulRequests, &p.FailedRequests,
 		&p.AvgResponseTime, &p.LastCheck, &p.LastError, &p.CreatedAt, &p.UpdatedAt,
 	)
@@ -171,14 +172,14 @@ func (r *ProxyRepository) GetByID(ctx context.Context, id int) (*models.Proxy, e
 // Create creates a new proxy
 func (r *ProxyRepository) Create(ctx context.Context, req models.CreateProxyRequest) (*models.Proxy, error) {
 	query := `
-		INSERT INTO proxies (address, protocol, username, password)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id, address, protocol, username, status, created_at, updated_at
+		INSERT INTO proxies (address, protocol, username, password, label)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id, address, protocol, username, label, status, created_at, updated_at
 	`
 
 	var p models.Proxy
-	err := r.db.Pool.QueryRow(ctx, query, req.Address, req.Protocol, req.Username, req.Password).Scan(
-		&p.ID, &p.Address, &p.Protocol, &p.Username, &p.Status, &p.CreatedAt, &p.UpdatedAt,
+	err := r.db.Pool.QueryRow(ctx, query, req.Address, req.Protocol, req.Username, req.Password, req.Label).Scan(
+		&p.ID, &p.Address, &p.Protocol, &p.Username, &p.Label, &p.Status, &p.CreatedAt, &p.UpdatedAt,
 	)
 
 	if err != nil {
@@ -201,14 +202,15 @@ func (r *ProxyRepository) Update(ctx context.Context, id int, req models.UpdateP
 		    protocol = COALESCE(NULLIF($2, ''), protocol),
 		    username = $3,
 		    password = $4,
+		    label = $5,
 		    updated_at = NOW()
-		WHERE id = $5
-		RETURNING id, address, protocol, status, updated_at
+		WHERE id = $6
+		RETURNING id, address, protocol, label, status, updated_at
 	`
 
 	var p models.Proxy
-	err := r.db.Pool.QueryRow(ctx, query, req.Address, req.Protocol, req.Username, req.Password, id).Scan(
-		&p.ID, &p.Address, &p.Protocol, &p.Status, &p.UpdatedAt,
+	err := r.db.Pool.QueryRow(ctx, query, req.Address, req.Protocol, req.Username, req.Password, req.Label, id).Scan(
+		&p.ID, &p.Address, &p.Protocol, &p.Label, &p.Status, &p.UpdatedAt,
 	)
 
 	if err == pgx.ErrNoRows {
