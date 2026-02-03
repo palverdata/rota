@@ -103,6 +103,7 @@ export default function ProxiesPage() {
     protocol: "http" as "http" | "https" | "socks5",
     username: "",
     password: "",
+    label: "",
   })
 
   // Import modal states
@@ -163,7 +164,7 @@ export default function ProxiesPage() {
     try {
       await api.addProxy(newProxy)
       setIsAddDialogOpen(false)
-      setNewProxy({ address: "", protocol: "http", username: "", password: "" })
+      setNewProxy({ address: "", protocol: "http", username: "", password: "", label: "" })
       toast.success("Proxy added successfully")
       fetchProxies()
     } catch (error) {
@@ -180,6 +181,7 @@ export default function ProxiesPage() {
         address: editingProxy.address,
         protocol: editingProxy.protocol,
         username: editingProxy.username,
+        label: editingProxy.label,
       })
       setIsEditDialogOpen(false)
       setEditingProxy(null)
@@ -453,6 +455,18 @@ export default function ProxiesPage() {
           {row.getValue("protocol")}
         </Badge>
       ),
+    },
+    {
+      accessorKey: "label",
+      header: "Label",
+      cell: ({ row }) => {
+        const label = row.getValue("label") as string | undefined
+        return label ? (
+          <span className="text-muted-foreground">{label}</span>
+        ) : (
+          <span className="text-muted-foreground/50">-</span>
+        )
+      },
     },
     {
       accessorKey: "status",
@@ -914,6 +928,15 @@ export default function ProxiesPage() {
                 onChange={(e) => setNewProxy({ ...newProxy, password: e.target.value })}
               />
             </div>
+            <div className="grid gap-2">
+              <Label htmlFor="label">Label (optional)</Label>
+              <Input
+                id="label"
+                placeholder="e.g., US-East, Datacenter-1"
+                value={newProxy.label}
+                onChange={(e) => setNewProxy({ ...newProxy, label: e.target.value })}
+              />
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
@@ -971,6 +994,15 @@ export default function ProxiesPage() {
                   id="edit-username"
                   value={editingProxy.username || ""}
                   onChange={(e) => setEditingProxy({ ...editingProxy, username: e.target.value })}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-label">Label (optional)</Label>
+                <Input
+                  id="edit-label"
+                  placeholder="e.g., US-East, Datacenter-1"
+                  value={editingProxy.label || ""}
+                  onChange={(e) => setEditingProxy({ ...editingProxy, label: e.target.value })}
                 />
               </div>
             </div>
