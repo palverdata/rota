@@ -108,10 +108,14 @@ export default function ProxiesPage() {
 
   // Import modal states
   const [importFile, setImportFile] = React.useState<File | null>(null)
-  const [importProtocol, setImportProtocol] = React.useState<"http" | "https" | "socks5">("http")
-  const [importUsername, setImportUsername] = React.useState("")
-  const [importPassword, setImportPassword] = React.useState("")
-  const [parsedProxies, setParsedProxies] = React.useState<string[]>([])
+  const [parsedProxies, setParsedProxies] = React.useState<Array<{
+    address: string
+    protocol: "http" | "https" | "socks4" | "socks4a" | "socks5"
+    username?: string
+    password?: string
+    label?: string
+    raw: string
+  }>>([])
   const [isImporting, setIsImporting] = React.useState(false)
   const [importProgress, setImportProgress] = React.useState({ current: 0, total: 0, success: 0, failed: 0, skipped: 0 })
   const [importResults, setImportResults] = React.useState<Array<{ address: string; status: string; error?: string }>>([])
@@ -256,20 +260,96 @@ export default function ProxiesPage() {
     }
   }
 
+  const formatProxyForExport = (proxy: Proxy): string => {
+    const credentials = proxy.username ? `${encodeURIComponent(proxy.username)}:@` : ''
+    const labelParam = proxy.label ? `?label=${encodeURIComponent(proxy.label)}` : ''
+    return `${proxy.protocol}://${credentials}${proxy.address}${labelParam}`
+  }
+
   const handleExport = async (format: "txt" | "json" | "csv") => {
     try {
-      const blob = await api.exportProxies(format)
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement("a")
-      a.href = url
-      a.download = `proxies.${format}`
-      a.click()
-      URL.revokeObjectURL(url)
+      if (format === "txt") {
+        const allProxiesResponse = await api.getProxies({ page: 1, limit: 10000 })
+        const lines = allProxiesResponse.proxies.map(formatProxyForExport)
+        const content = lines.join('\n')
+        const blob = new Blob([content], { type: 'text/plain' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement("a")
+        a.href = url
+        a.download = `proxies.${format}`
+        a.click()
+        URL.revokeObjectURL(url)
+      } else {
+        const blob = await api.exportProxies(format)
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement("a")
+        a.href = url
+        a.download = `proxies.${format}`
+        a.click()
+        URL.revokeObjectURL(url)
+      }
       toast.success(`Proxies exported as ${format.toUpperCase()}`)
     } catch (error) {
       console.error("Failed to export proxies:", error)
       toast.error("Failed to export proxies", error instanceof Error ? error.message : "Unknown error")
     }
+  }
+
+  const parseProxyLine = (line: string): {
+    address: string
+    protocol: "http" | "https" | "socks4" | "socks4a" | "socks5"
+    username?: string
+    password?: string
+    label?: string
+    raw: string
+  } | null => {
+    const trimmedLine = line.trim()
+    if (!trimmedLine) return null
+
+    try {
+      if (trimmedLine.includes('://')) {
+        const url = new URL(trimmedLine)
+        const protocol = url.protocol.replace(':', '').toLowerCase() as "http" | "https" | "socks4" | "socks4a" | "socks5"
+        
+        if (!['http', 'https', 'socks4', 'socks4a', 'socks5'].includes(protocol)) {
+          return null
+        }
+
+        const address = `${url.hostname}:${url.port || (protocol === 'https' ? '443' : '80')}`
+        const username = url.username ? decodeURIComponent(url.username) : undefined
+        const password = url.password ? decodeURIComponent(url.password) : undefined
+        const label = url.searchParams.get('label') || undefined
+
+        return {
+          address,
+          protocol,
+          username,
+          password,
+          label,
+          raw: trimmedLine,
+        }
+      } else {
+        const parts = trimmedLine.split(':')
+        if (parts.length >= 2 && parts[1].match(/^\d+$/)) {
+          return {
+            address: trimmedLine,
+            protocol: 'http',
+            raw: trimmedLine,
+          }
+        }
+      }
+    } catch {
+      const parts = trimmedLine.split(':')
+      if (parts.length >= 2 && parts[1].match(/^\d+$/)) {
+        return {
+          address: trimmedLine,
+          protocol: 'http',
+          raw: trimmedLine,
+        }
+      }
+    }
+
+    return null
   }
 
   const handleFileUpload = (file: File) => {
@@ -282,15 +362,11 @@ export default function ProxiesPage() {
     reader.onload = (e) => {
       const text = e.target?.result as string
       const lines = text.split('\n')
-        .map(line => line.trim())
-        .filter(line => line.length > 0)
-        .filter(line => {
-          // Basic validation: IP:PORT format
-          const parts = line.split(':')
-          return parts.length >= 2 && parts[1].match(/^\d+$/)
-        })
+      const parsed = lines
+        .map(line => parseProxyLine(line))
+        .filter((proxy): proxy is NonNullable<typeof proxy> => proxy !== null)
 
-      setParsedProxies(lines)
+      setParsedProxies(parsed)
       setImportFile(file)
     }
     reader.readAsText(file)
@@ -335,33 +411,33 @@ export default function ProxiesPage() {
     let skipped = 0
 
     for (let i = 0; i < parsedProxies.length; i++) {
-      const address = parsedProxies[i]
+      const proxy = parsedProxies[i]
 
       try {
         await api.addProxy({
-          address,
-          protocol: importProtocol,
-          username: importUsername || undefined,
-          password: importPassword || undefined,
+          address: proxy.address,
+          protocol: proxy.protocol,
+          username: proxy.username,
+          password: proxy.password,
+          label: proxy.label,
         })
 
         success++
-        results.push({ address, status: 'success' })
+        results.push({ address: proxy.address, status: 'success' })
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error'
 
-        // Check if it's a duplicate error
         if (errorMessage.includes('already exists')) {
           skipped++
           results.push({
-            address,
+            address: proxy.address,
             status: 'skipped',
             error: 'Already exists (skipped)'
           })
         } else {
           failed++
           results.push({
-            address,
+            address: proxy.address,
             status: 'failed',
             error: errorMessage
           })
@@ -379,7 +455,6 @@ export default function ProxiesPage() {
     }
 
     setIsImporting(false)
-    // Refresh the proxy list
     setTimeout(() => {
       fetchProxies()
     }, 1000)
@@ -388,9 +463,6 @@ export default function ProxiesPage() {
   const resetImportDialog = () => {
     setImportFile(null)
     setParsedProxies([])
-    setImportProtocol("http")
-    setImportUsername("")
-    setImportPassword("")
     setIsImporting(false)
     setImportProgress({ current: 0, total: 0, success: 0, failed: 0, skipped: 0 })
     setImportResults([])
@@ -1027,7 +1099,7 @@ export default function ProxiesPage() {
           <DialogHeader>
             <DialogTitle>Import Proxies from TXT</DialogTitle>
             <DialogDescription>
-              Upload a .txt file with proxies in IP:PORT format (one per line)
+              Upload a .txt file with proxies (one per line). Supported formats: protocol://user:pass@ip:port?label=name or ip:port
             </DialogDescription>
           </DialogHeader>
 
@@ -1059,7 +1131,7 @@ export default function ProxiesPage() {
                   Drop your .txt file here or click to browse
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  File format: One proxy per line (IP:PORT)
+                  Format: protocol://user:pass@ip:port?label=name or ip:port
                 </p>
               </div>
             ) : (
@@ -1092,11 +1164,20 @@ export default function ProxiesPage() {
                   <>
                     <div className="grid gap-2">
                       <Label>Preview (first 10 proxies)</Label>
-                      <div className="border rounded-md p-3 bg-muted/30 max-h-32 overflow-y-auto">
-                        <div className="font-mono text-sm space-y-1">
+                      <div className="border rounded-md p-3 bg-muted/30 max-h-48 overflow-y-auto">
+                        <div className="font-mono text-sm space-y-2">
                           {parsedProxies.slice(0, 10).map((proxy, idx) => (
-                            <div key={idx} className="text-muted-foreground">
-                              {proxy}
+                            <div key={idx} className="text-muted-foreground border-b border-muted pb-2 last:border-0 last:pb-0">
+                              <div className="flex items-center gap-2">
+                                <Badge variant="outline" className="uppercase text-xs">{proxy.protocol}</Badge>
+                                <span>{proxy.address}</span>
+                              </div>
+                              {(proxy.username || proxy.label) && (
+                                <div className="text-xs mt-1 flex gap-3">
+                                  {proxy.username && <span>User: {proxy.username}</span>}
+                                  {proxy.label && <span>Label: {proxy.label}</span>}
+                                </div>
+                              )}
                             </div>
                           ))}
                           {parsedProxies.length > 10 && (
@@ -1106,49 +1187,6 @@ export default function ProxiesPage() {
                           )}
                         </div>
                       </div>
-                    </div>
-
-                    <div className="grid gap-2">
-                      <Label htmlFor="import-protocol">Protocol</Label>
-                      <Select
-                        value={importProtocol}
-                        onValueChange={(value: any) => setImportProtocol(value)}
-                        disabled={isImporting}
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="http">HTTP</SelectItem>
-                          <SelectItem value="https">HTTPS</SelectItem>
-                          <SelectItem value="socks4">SOCKS4</SelectItem>
-                          <SelectItem value="socks4a">SOCKS4A</SelectItem>
-                          <SelectItem value="socks5">SOCKS5</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="grid gap-2">
-                      <Label htmlFor="import-username">Username (optional)</Label>
-                      <Input
-                        id="import-username"
-                        value={importUsername}
-                        onChange={(e) => setImportUsername(e.target.value)}
-                        disabled={isImporting}
-                        placeholder="Leave empty if not required"
-                      />
-                    </div>
-
-                    <div className="grid gap-2">
-                      <Label htmlFor="import-password">Password (optional)</Label>
-                      <Input
-                        id="import-password"
-                        type="password"
-                        value={importPassword}
-                        onChange={(e) => setImportPassword(e.target.value)}
-                        disabled={isImporting}
-                        placeholder="Leave empty if not required"
-                      />
                     </div>
 
                     {isImporting && (
