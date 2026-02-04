@@ -48,24 +48,14 @@ spec:
               mountPath: /var/lib/postgresql/data
           livenessProbe:
             exec:
-              command:
-                - pg_isready
-                - -U
-                - rota
-                - -d
-                - rota
+              command: ["pg_isready","-U","palver","-d","rota"]
             initialDelaySeconds: 10
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 5
           readinessProbe:
             exec:
-              command:
-                - pg_isready
-                - -U
-                - rota
-                - -d
-                - rota
+              command: ["pg_isready","-U","palver","-d","rota"]
             initialDelaySeconds: 10
             periodSeconds: 10
             timeoutSeconds: 5
