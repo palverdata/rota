@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: core
+  namespace: rota
+  labels:
+    app: core
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: core
+  template:
+    metadata:
+      labels:
+        app: core
+    spec:
+      imagePullSecrets:
+        - name: dockerhub-palverdata
+      containers:
+        - name: core
+          image: palverdata/rota_core:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8000
+              name: proxy
+            - containerPort: 8001
+              name: api
+          envFrom:
+            - configMapRef:
+                name: rota-config
+            - secretRef:
+                name: rota-secrets
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            initialDelaySeconds: 5
+            periodSeconds: 30
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: core
+  namespace: rota
+  labels:
+    app: core
+spec:
+  type: LoadBalancer
+  selector:
+    app: core
+  ports:
+    - name: proxy
+      port: 8000
+      targetPort: 8000
+    - name: api
+      port: 8001
+      targetPort: 8001
