@@ -1,5 +1,5 @@
 # Stage 1: Dependencies
-FROM node:20-alpine AS deps
+FROM node:20.20.0-alpine3.23 AS deps
 WORKDIR /app
 
 # Install pnpm
@@ -10,7 +10,7 @@ COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 
 # Stage 2: Builder
-FROM node:20-alpine AS builder
+FROM node:20.20.0-alpine3.23 AS builder
 WORKDIR /app
 
 # Install pnpm

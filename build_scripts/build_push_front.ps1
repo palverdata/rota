@@ -15,6 +15,7 @@ $ApiUrl = if ($args[0]) { $args[0] } else { "http://localhost:8001" }
 Write-Host "Building frontend Docker image with NEXT_PUBLIC_API_URL=$ApiUrl..."
 docker build `
     --build-arg NEXT_PUBLIC_API_URL="$ApiUrl" `
+    --no-cache `
     -t palverdata/rota_front:latest `
     -f "$RepoRoot\dashboard\Dockerfile" `
     "$RepoRoot\dashboard"
