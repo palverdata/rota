@@ -9,7 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 
 echo "Building core Docker image..."
-docker build -t palverdata/rota_core:latest -f "$REPO_ROOT/core/Dockerfile" "$REPO_ROOT/core"
+docker build -t --no-cache palverdata/rota_core:latest -f "$REPO_ROOT/core/Dockerfile" "$REPO_ROOT/core"
 
 echo "Pushing core Docker image to DockerHub..."
 docker push palverdata/rota_core:latest
