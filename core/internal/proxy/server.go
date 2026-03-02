@@ -12,6 +12,18 @@ import (
 	"github.com/elazarl/goproxy"
 )
 
+// ensureBody guarantees that resp.Body is non-nil.
+// goproxy panics (nil-pointer deref in handleHttp) when a handler returns
+// an *http.Response whose Body is nil, because it unconditionally defers
+// origBody.Close(). Using http.NoBody is safe — it implements io.ReadCloser
+// and Close is a no-op.
+func ensureBody(resp *http.Response) *http.Response {
+	if resp != nil && resp.Body == nil {
+		resp.Body = http.NoBody
+	}
+	return resp
+}
+
 // Server represents the proxy server
 type Server struct {
 	proxy          *goproxy.ProxyHttpServer
@@ -105,16 +117,17 @@ func New(
 	proxyServer.OnRequest().DoFunc(func(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
 		// Authentication middleware
 		if req, resp := authMiddleware.HandleRequest(req, ctx); resp != nil {
-			return req, resp
+			return req, ensureBody(resp)
 		}
 
 		// Rate limiting middleware
 		if req, resp := rateLimitMw.HandleRequest(req, ctx); resp != nil {
-			return req, resp
+			return req, ensureBody(resp)
 		}
 
 		// Main handler
-		return handler.HandleRequest(req, ctx)
+		req, resp := handler.HandleRequest(req, ctx)
+		return req, ensureBody(resp)
 	})
 
 	// HTTPS CONNECT requests - middleware only (actual dial handled by ConnectDial above)
