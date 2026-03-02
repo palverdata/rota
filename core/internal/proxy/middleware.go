@@ -95,6 +95,7 @@ func (m *AuthMiddleware) unauthorized() *http.Response {
 		ProtoMajor: 1,
 		ProtoMinor: 1,
 		Header:     make(http.Header),
+		Body:       http.NoBody,
 	}
 	resp.Header.Set("Proxy-Authenticate", `Basic realm="Rota Proxy"`)
 	return resp
@@ -203,6 +204,7 @@ func (m *RateLimitMiddleware) tooManyRequests() *http.Response {
 		ProtoMajor: 1,
 		ProtoMinor: 1,
 		Header:     make(http.Header),
+		Body:       http.NoBody,
 	}
 }
 
